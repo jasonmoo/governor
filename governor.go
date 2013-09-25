@@ -18,7 +18,7 @@ type Governor struct {
 	f        func()
 }
 
-func NewGovernor(interval time.Duration, f func()) *Governor {
+func New(interval time.Duration, f func(...interface{})) *Governor {
 	return &Governor{
 		ready:      1,
 		ready_cond: new(sync.Cond),
@@ -38,38 +38,38 @@ func (g *Governor) SetBlocking(blocking bool) {
 	g.Unlock()
 }
 
-func (g *Governor) SetFunc(f func()) {
+func (g *Governor) SetFunc(f func(...interface{})) {
 	g.Lock()
 	g.f = f
 	g.Unlock()
 }
 
-func (g *Governor) Do() {
+func (g *Governor) Do(args ...interface{}) {
 
-	ready := atomic.SwapInt64(&g.ready, 0)
+	ready := atomic.SwapUint32(&g.ready, 0)
 
 	if ready == 0 {
 		if g.blocking {
 			g.ready_cond.Wait()
 		}
-	} else {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Println("governor do panic'd!", r)
-			}
-
-			if remainder := g.interval - time.Since(start); remainder > 0 {
-				time.Sleep(remainder)
-			}
-
-			atomic.StoreUint32(&g.ready, 1)
-			g.ready_cond.Broadcast()
-		}()
-
-		g.Lock()
-		defer g.Unlock()
-
-		start := time.Now()
-		g.f()
+		return
 	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Println("governor do panic'd!", r)
+		}
+
+		if remainder := g.interval - time.Since(start); remainder > 0 {
+			time.Sleep(remainder)
+		}
+
+		atomic.StoreUint32(&g.ready, 1)
+		g.Unlock()
+		g.ready_cond.Broadcast()
+	}()
+
+	g.Lock()
+	g.f(args...)
+
 }
